@@ -1,0 +1,126 @@
+# Log files
+*.log
+*.txt
+*_output.txt
+*_debug.log
+*_output.log
+
+# PE test files (they will be regenerated)
+test_pe.exe
+test_pe.exe_*
+
+# Executables
+*.exe
+
+# Build artifacts
+bin/
+build/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Python virtual environment
+.cunfyooz/
+venv/
+env/
+ENV/
+
+# Python compiled files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+
+# Python package management
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+.coverage.xml
+*.cover
+*.log
+
+# Distribution artifacts
+.pytest_cache/
+.hypothesis/
+.DS_Store
+.eggs/
+eggs/
+.parts/
+.sconf_temp/
+.var/
+.inst/
+build/
+dist/
+downloads/
+src/*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+\#*\#
+.vs/
+
+# Configuration and secrets
+config.json
+.env
+.env.local
+.env.*.local
+.env.production
+.env.production.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.staging
+.env.staging.local
+*.config.json
+config.local.json
+config.production.json
+config.development.json
+config.test.json
+
+# Secrets and credentials
+*.key
+*.pem
+*.crt
+*.cert
+*.secret
+id_rsa
+id_rsa.pub
+secrets/
+credentials/
+aws-credentials
+.aws/
+.gcloud/
+
+# File system metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Icon?
+!Icon?  # In case you want to force-add an actual Icon file
+
+# Extended attributes and alternate data streams
+*.zsh
+*:Zone.Identifier
+*.rsrc
