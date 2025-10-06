@@ -36,7 +36,7 @@ config_t* parse_json_config(const char* json_string) {
 
 static const char* parse_object(config_t* config, const char* json_string, const char* parent_key) {
     const char* current_pos = json_string;
-    while (current_pos && *current_pos != '}') {
+    while (current_pos && *current_pos != '}' && *current_pos != '\0') {
         const char* key_start = strchr(current_pos, '"');
         if (!key_start) break;
 
@@ -60,32 +60,83 @@ static const char* parse_object(config_t* config, const char* json_string, const
 
         current_pos = parse_value(config, colon + 1, parent_key, key);
 
-        // Find next comma or closing brace
-        const char* next_token = strchr(current_pos, ',');
-        if (next_token && *(next_token + 1) != '}') {
-            current_pos = next_token + 1;
+        if (!current_pos) {
+            fprintf(stderr, "Invalid JSON format: failed to parse value.\n");
+            return NULL;
+        }
+
+        // Skip whitespace after value
+        while (*current_pos && isspace(*current_pos)) current_pos++;
+
+        // Check if we have a comma or closing brace
+        if (*current_pos == ',') {
+            current_pos++; // Skip comma
+            // Skip whitespace after comma
+            while (*current_pos && isspace(*current_pos)) current_pos++;
+        } else if (*current_pos == '}') {
+            // Found closing brace, break out of loop
+            break;
+        } else if (*current_pos == '\0') {
+            // End of string without closing brace
+            fprintf(stderr, "Invalid JSON format: unexpected end of string.\n");
+            return NULL;
         } else {
-            current_pos = strchr(current_pos, '}');
+            // Unexpected character
+            fprintf(stderr, "Invalid JSON format: unexpected character '%c'.\n", *current_pos);
+            return NULL;
         }
     }
-    return current_pos ? current_pos + 1 : NULL;
+
+    if (*current_pos != '}') {
+        fprintf(stderr, "Invalid JSON format: missing closing brace.\n");
+        return NULL;
+    }
+
+    return current_pos + 1; // Return position after closing brace
 }
 
-static void set_config_value(config_t* config, const char* transform_key, const char* property_key, long value) {
-    transformation_property_t* t_config = NULL;
-    if (strcmp(transform_key, "nop_insertion") == 0) t_config = &config->transformations.nop_insertion;
-    else if (strcmp(transform_key, "instruction_substitution") == 0) t_config = &config->transformations.instruction_substitution;
-    else if (strcmp(transform_key, "register_shuffling") == 0) t_config = &config->transformations.register_shuffling;
-    else if (strcmp(transform_key, "enhanced_nop_insertion") == 0) t_config = &config->transformations.enhanced_nop_insertion;
-    else if (strcmp(transform_key, "control_flow_obfuscation") == 0) t_config = &config->transformations.control_flow_obfuscation;
-    else if (strcmp(transform_key, "stack_frame_obfuscation") == 0) t_config = &config->transformations.stack_frame_obfuscation;
-    else if (strcmp(transform_key, "instruction_reordering") == 0) t_config = &config->transformations.instruction_reordering;
-    else if (strcmp(transform_key, "anti_analysis_techniques") == 0) t_config = &config->transformations.anti_analysis_techniques;
-    else if (strcmp(transform_key, "virtualization_engine") == 0) t_config = &config->transformations.virtualization_engine;
-
-    if (t_config) {
-        if (strcmp(property_key, "enabled") == 0) t_config->enabled = (bool)value;
-        else if (strcmp(property_key, "probability") == 0) t_config->probability = (int)value;
+static void set_config_value(config_t* config, const char* parent_key, const char* property_key, long value) {
+    // Handle transformation properties
+    if (strcmp(parent_key, "nop_insertion") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.nop_insertion.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.nop_insertion.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "instruction_substitution") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.instruction_substitution.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.instruction_substitution.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "register_shuffling") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.register_shuffling.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.register_shuffling.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "enhanced_nop_insertion") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.enhanced_nop_insertion.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.enhanced_nop_insertion.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "control_flow_obfuscation") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.control_flow_obfuscation.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.control_flow_obfuscation.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "stack_frame_obfuscation") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.stack_frame_obfuscation.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.stack_frame_obfuscation.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "instruction_reordering") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.instruction_reordering.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.instruction_reordering.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "anti_analysis_techniques") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.anti_analysis_techniques.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.anti_analysis_techniques.probability = (int)value;
+    }
+    else if (strcmp(parent_key, "virtualization_engine") == 0) {
+        if (strcmp(property_key, "enabled") == 0) config->transformations.virtualization_engine.enabled = (bool)value;
+        else if (strcmp(property_key, "probability") == 0) config->transformations.virtualization_engine.probability = (int)value;
+    }
+    // Handle security properties
+    else if (strcmp(parent_key, "security") == 0) {
+        if (strcmp(property_key, "validate_functionality") == 0) config->security.validate_functionality = (bool)value;
+        else if (strcmp(property_key, "preserve_original_behavior") == 0) config->security.preserve_original_behavior = (bool)value;
     }
 }
 

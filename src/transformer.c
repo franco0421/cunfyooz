@@ -840,6 +840,134 @@ instruction_list* apply_stack_frame_obfuscation(const instruction_list* original
     return new_list;
 }
 
+
+// Helper struct for register access analysis
+typedef struct {
+    x86_reg read_regs[16];
+    int read_count;
+    x86_reg written_regs[16];
+    int written_count;
+    bool reads_memory;
+    bool writes_memory;
+    bool modifies_flags;
+} reg_access_info;
+
+// Helper function to get register access info for an instruction
+static void get_register_access_info(cs_insn *insn, reg_access_info *info) {
+    memset(info, 0, sizeof(reg_access_info));
+    if (!insn->detail) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < insn->detail->regs_read_count; i++) {
+        if (info->read_count < 16) {
+            info->read_regs[info->read_count++] = insn->detail->regs_read[i];
+        }
+    }
+
+    for (uint8_t i = 0; i < insn->detail->regs_write_count; i++) {
+        if (insn->detail->regs_write[i] == X86_REG_EFLAGS) {
+            info->modifies_flags = true;
+        } else {
+            if (info->written_count < 16) {
+                info->written_regs[info->written_count++] = insn->detail->regs_write[i];
+            }
+        }
+    }
+
+    for (uint8_t i = 0; i < insn->detail->x86.op_count; i++) {
+        cs_x86_op *op = &(insn->detail->x86.operands[i]);
+        if (op->type == X86_OP_MEM) {
+            if (op->access & CS_AC_READ) {
+                info->reads_memory = true;
+            }
+            if (op->access & CS_AC_WRITE) {
+                info->writes_memory = true;
+            }
+        }
+    }
+}
+
+// Helper function to check if an instruction reads CPU flags
+static bool instruction_reads_flags(cs_insn *insn) {
+    switch (insn->id) {
+        // Conditional jumps
+        case X86_INS_JA: case X86_INS_JAE: case X86_INS_JB: case X86_INS_JBE:
+        case X86_INS_JCXZ: case X86_INS_JECXZ: case X86_INS_JRCXZ: case X86_INS_JE:
+        case X86_INS_JG: case X86_INS_JGE: case X86_INS_JL: case X86_INS_JLE:
+        case X86_INS_JNE: case X86_INS_JNO: case X86_INS_JNP: case X86_INS_JNS:
+        case X86_INS_JO: case X86_INS_JP: case X86_INS_JS:
+        // Conditional move
+        case X86_INS_CMOVA: case X86_INS_CMOVAE: case X86_INS_CMOVB: case X86_INS_CMOVBE:
+        case X86_INS_CMOVE: case X86_INS_CMOVG: case X86_INS_CMOVGE: case X86_INS_CMOVL:
+        case X86_INS_CMOVLE: case X86_INS_CMOVNE: case X86_INS_CMOVNO: case X86_INS_CMOVNP:
+        case X86_INS_CMOVNS: case X86_INS_CMOVO: case X86_INS_CMOVP: case X86_INS_CMOVS:
+        // Set byte on condition
+        case X86_INS_SETA: case X86_INS_SETAE: case X86_INS_SETB: case X86_INS_SETBE:
+        case X86_INS_SETE: case X86_INS_SETG: case X86_INS_SETGE: case X86_INS_SETL:
+        case X86_INS_SETLE: case X86_INS_SETNE: case X86_INS_SETNO: case X86_INS_SETNP:
+        case X86_INS_SETNS: case X86_INS_SETO: case X86_INS_SETP: case X86_INS_SETS:
+        // Add/sub with carry
+        case X86_INS_ADC: case X86_INS_SBB:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Helper function to check if two instructions are independent
+static bool instructions_are_independent(cs_insn *insn1, cs_insn *insn2) {
+    reg_access_info info1, info2;
+    get_register_access_info(insn1, &info1);
+    get_register_access_info(insn2, &info2);
+
+    // RAW dependency: insn2 reads a register that insn1 writes.
+    for (int i = 0; i < info1.written_count; i++) {
+        for (int j = 0; j < info2.read_count; j++) {
+            if (info1.written_regs[i] == info2.read_regs[j]) {
+                return false; // RAW dependency
+            }
+        }
+    }
+
+    // WAR dependency: insn2 writes a register that insn1 reads.
+    for (int i = 0; i < info1.read_count; i++) {
+        for (int j = 0; j < info2.written_count; j++) {
+            if (info1.read_regs[i] == info2.written_regs[j]) {
+                return false; // WAR dependency
+            }
+        }
+    }
+
+    // WAW dependency: insn2 writes a register that insn1 also writes.
+    for (int i = 0; i < info1.written_count; i++) {
+        for (int j = 0; j < info2.written_count; j++) {
+            if (info1.written_regs[i] == info2.written_regs[j]) {
+                return false; // WAW dependency
+            }
+        }
+    }
+
+    // Memory dependency: if both access memory, be conservative.
+    if ((info1.reads_memory || info1.writes_memory) && (info2.reads_memory || info2.writes_memory)) {
+        return false;
+    }
+
+    // Flag dependency
+    if (info1.modifies_flags && instruction_reads_flags(insn2)) {
+        return false;
+    }
+    if (info2.modifies_flags && instruction_reads_flags(insn1)) {
+        return false;
+    }
+    // WAW on flags
+    if (info1.modifies_flags && info2.modifies_flags) {
+        return false;
+    }
+
+    return true;
+}
+
 // Instruction Reordering - Basic implementation for independent instructions
 instruction_list* apply_instruction_reordering(const instruction_list* original_instructions) {
     instruction_list* new_list = (instruction_list*)malloc(sizeof(instruction_list));
@@ -867,40 +995,31 @@ instruction_list* apply_instruction_reordering(const instruction_list* original_
         }
     }
     
-    // Simple reordering: Reverse every other block of instructions (or apply some basic reordering)
-    // Only reorder if there are at least 2 instructions to avoid issues with control flow
+    // Reorder instructions with proper dependency checking
     if (original_instructions->count >= 2 && rand() % 100 < 50) { // 50% chance to reorder
-        // Perform simple reordering: swap nearby instructions when safe
-        for (size_t i = 0; i < new_list->count - 1; i += 2) {
-            // Only swap if both instructions are non-control-flow and non-memory operations
+        for (size_t i = 0; i < new_list->count - 1; i++) {
             cs_insn* insn1 = &new_list->instructions[i];
             cs_insn* insn2 = &new_list->instructions[i+1];
             
-            // Avoid swapping control flow instructions
-            int is_control_flow_1 = (insn1->id == X86_INS_JMP || insn1->id == X86_INS_CALL || 
-                                   insn1->id == X86_INS_RET || insn1->id == X86_INS_INT ||
-                                   (insn1->id >= X86_INS_JA && insn1->id <= X86_INS_JS)); // Conditional jumps
-            
-            int is_control_flow_2 = (insn2->id == X86_INS_JMP || insn2->id == X86_INS_CALL || 
-                                   insn2->id == X86_INS_RET || insn2->id == X86_INS_INT ||
-                                   (insn2->id >= X86_INS_JA && insn2->id <= X86_INS_JS)); // Conditional jumps
-            
-            // Only swap if both are not control flow and it's safe to do so
-            if (!is_control_flow_1 && !is_control_flow_2 && 
-                !(insn1->id == X86_INS_PUSH || insn1->id == X86_INS_POP) &&
-                !(insn2->id == X86_INS_PUSH || insn2->id == X86_INS_POP) &&
-                rand() % 100 < 30) { // Only 30% of eligible pairs get reordered
-                
-                // Perform the swap
-                cs_insn temp = new_list->instructions[i];
-                new_list->instructions[i] = new_list->instructions[i+1];
-                new_list->instructions[i+1] = temp;
+            // Check for control flow instructions
+            int is_control_flow_1 = (insn1->id >= X86_INS_JAE && insn1->id <= X86_INS_JS) || insn1->id == X86_INS_JMP || insn1->id == X86_INS_CALL || insn1->id == X86_INS_RET;
+            int is_control_flow_2 = (insn2->id >= X86_INS_JAE && insn2->id <= X86_INS_JS) || insn2->id == X86_INS_JMP || insn2->id == X86_INS_CALL || insn2->id == X86_INS_RET;
+
+            if (!is_control_flow_1 && !is_control_flow_2 && instructions_are_independent(insn1, insn2)) {
+                if (rand() % 100 < 30) { // 30% chance to swap independent instructions
+                    // Perform the swap
+                    cs_insn temp = new_list->instructions[i];
+                    new_list->instructions[i] = new_list->instructions[i+1];
+                    new_list->instructions[i+1] = temp;
+                    i++; // Skip the next instruction since we just swapped it
+                }
             }
         }
     }
     
     return new_list;
 }
+
 
 
 // Anti-Analysis Techniques

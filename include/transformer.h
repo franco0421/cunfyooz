@@ -24,6 +24,11 @@ typedef struct {
         transformation_property_t anti_analysis_techniques;
         transformation_property_t virtualization_engine;
     } transformations;
+    
+    struct {
+        bool validate_functionality;
+        bool preserve_original_behavior;
+    } security;
 } config_t;
 
 // Function to apply a NOP insertion transformation

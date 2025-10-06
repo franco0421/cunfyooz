@@ -10,10 +10,110 @@
 #include "transformer.h"
 #include "assembler.h"
 
+#include "json_parser.h"
+#include <sys/wait.h>
+
+// Function to validate that transformed executable behaves the same as original
+int validate_transformation(const char* original_file, const char* transformed_file) {
+    // For now, we'll implement a basic validation by running both and comparing output
+    // In a complete implementation, we'd want more sophisticated checks
+    
+    char original_cmd[512], transformed_cmd[512];
+    char original_output[256], transformed_output[256];
+    
+    // Run original executable and capture output
+    snprintf(original_cmd, sizeof(original_cmd), "wine %s 2>/dev/null", original_file);
+    FILE* orig_fp = popen(original_cmd, "r");
+    if (!orig_fp) {
+        fprintf(stderr, "Failed to run original executable for validation\n");
+        return -1;
+    }
+    
+    if (fgets(original_output, sizeof(original_output), orig_fp) == NULL) {
+        // Handle case where no output is generated
+        original_output[0] = '\0';
+    }
+    pclose(orig_fp);
+    
+    // Run transformed executable and capture output
+    snprintf(transformed_cmd, sizeof(transformed_cmd), "wine %s 2>/dev/null", transformed_file);
+    FILE* trans_fp = popen(transformed_cmd, "r");
+    if (!trans_fp) {
+        fprintf(stderr, "Failed to run transformed executable for validation\n");
+        return -1;
+    }
+    
+    if (fgets(transformed_output, sizeof(transformed_output), trans_fp) == NULL) {
+        // Handle case where no output is generated
+        transformed_output[0] = '\0';
+    }
+    pclose(trans_fp);
+    
+    // Compare outputs, handling potential line ending differences
+    size_t orig_len = strlen(original_output);
+    size_t trans_len = strlen(transformed_output);
+    
+    // Remove potential \r\n or \n at the end of both strings
+    if (orig_len > 0 && original_output[orig_len - 1] == '\n') {
+        original_output[orig_len - 1] = '\0';
+        orig_len--;
+        if (orig_len > 0 && original_output[orig_len - 1] == '\r') {
+            original_output[orig_len - 1] = '\0';
+        }
+    }
+    
+    if (trans_len > 0 && transformed_output[trans_len - 1] == '\n') {
+        transformed_output[trans_len - 1] = '\0';
+        trans_len--;
+        if (trans_len > 0 && transformed_output[trans_len - 1] == '\r') {
+            transformed_output[trans_len - 1] = '\0';
+        }
+    }
+    
+    // If outputs match, transformation is valid
+    return strcmp(original_output, transformed_output) == 0 ? 1 : 0;
+}
+
 int main(int argc, char *argv[]) {
     // Initialize random seed for metamorphic operations
     srand((unsigned int)time(NULL) + clock());
     
+    config_t* config = NULL;
+    FILE* config_file = fopen("config.json", "r");
+    if (config_file) {
+        fseek(config_file, 0, SEEK_END);
+        long length = ftell(config_file);
+        fseek(config_file, 0, SEEK_SET);
+        char* buffer = (char*)malloc(length + 1);
+        if (buffer) {
+            fread(buffer, 1, length, config_file);
+            buffer[length] = '\0';
+            config = parse_json_config(buffer);
+            free(buffer);
+        }
+        fclose(config_file);
+    }
+
+    if (!config) {
+        // Create default config if file doesn't exist or parsing fails
+        config = (config_t*)malloc(sizeof(config_t));
+        if (config) {
+            config->transformations.nop_insertion.enabled = true;
+            config->transformations.instruction_substitution.enabled = true;
+            config->transformations.register_shuffling.enabled = true;
+            config->transformations.enhanced_nop_insertion.enabled = true;
+            config->transformations.control_flow_obfuscation.enabled = true;
+            config->transformations.stack_frame_obfuscation.enabled = true;
+            config->transformations.instruction_reordering.enabled = true;
+            config->transformations.anti_analysis_techniques.enabled = true;
+            config->transformations.virtualization_engine.enabled = false; // Disabled by default
+            
+            // Set default security settings
+            config->security.validate_functionality = true;
+            config->security.preserve_original_behavior = true;
+        }
+    }
+
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <executable_path>\n", argv[0]);
         return 1;
@@ -66,180 +166,107 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("Original Instructions:\n");
-    for (size_t i = 0; i < original_instructions->count; i++) {
-        cs_insn* insn = &original_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
-    }
-    fflush(stdout);
+    instruction_list* transformed_instructions = original_instructions;
+    instruction_list* to_free = NULL;  // Keep track of intermediate results to free
 
-    // Apply NOP insertion
-    instruction_list* nop_transformed_instructions = apply_nop_insertion(original_instructions);
-    if (!nop_transformed_instructions) {
-        fprintf(stderr, "NOP insertion failed.\n");
-        free_instruction_list(original_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
+    if (config && config->transformations.nop_insertion.enabled) {
+        instruction_list* next_instructions = apply_nop_insertion(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    printf("\nNOP Transformed Instructions:\n");
-    for (size_t i = 0; i < nop_transformed_instructions->count; i++) {
-        cs_insn* insn = &nop_transformed_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
+    if (config && config->transformations.instruction_substitution.enabled) {
+        instruction_list* next_instructions = apply_instruction_substitution(transformed_instructions, handle);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    fflush(stdout);
-    free_instruction_list(original_instructions);
-
-    // Apply instruction substitution
-    instruction_list* substituted_instructions = apply_instruction_substitution(nop_transformed_instructions, handle);
-    recalculate_addresses(substituted_instructions);
-    if (!substituted_instructions) {
-        fprintf(stderr, "Instruction substitution failed (substituted_instructions is NULL).\n");
-        free_instruction_list(nop_transformed_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
+    if (config && config->transformations.register_shuffling.enabled) {
+        instruction_list* next_instructions = apply_register_shuffling(transformed_instructions, handle);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    printf("\nSubstituted Instructions:\n");
-    for (size_t i = 0; i < substituted_instructions->count; i++) {
-        cs_insn* insn = &substituted_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
+    if (config && config->transformations.enhanced_nop_insertion.enabled) {
+        instruction_list* next_instructions = apply_enhanced_nop_insertion(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    fflush(stdout);
-    free_instruction_list(nop_transformed_instructions);
-
-    // Apply register shuffling
-    instruction_list* shuffled_instructions = apply_register_shuffling(substituted_instructions, handle);
-    recalculate_addresses(shuffled_instructions);
-    if (!shuffled_instructions) {
-        fprintf(stderr, "Register shuffling failed.\n");
-        free_instruction_list(substituted_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
+    if (config && config->transformations.control_flow_obfuscation.enabled) {
+        instruction_list* next_instructions = apply_control_flow_obfuscation(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    printf("\nShuffled Instructions:\n");
-    for (size_t i = 0; i < shuffled_instructions->count; i++) {
-        cs_insn* insn = &shuffled_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
+    if (config && config->transformations.stack_frame_obfuscation.enabled) {
+        instruction_list* next_instructions = apply_stack_frame_obfuscation(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    fflush(stdout);
-    free_instruction_list(substituted_instructions);
-
-    // Apply enhanced NOP insertion
-    instruction_list* enhanced_nop_instructions = apply_enhanced_nop_insertion(shuffled_instructions);
-    recalculate_addresses(enhanced_nop_instructions);
-    if (!enhanced_nop_instructions) {
-        fprintf(stderr, "Enhanced NOP insertion failed.\n");
-        free_instruction_list(shuffled_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
+    if (config && config->transformations.instruction_reordering.enabled) {
+        instruction_list* next_instructions = apply_instruction_reordering(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    printf("\nEnhanced NOP Instructions:\n");
-    for (size_t i = 0; i < enhanced_nop_instructions->count; i++) {
-        cs_insn* insn = &enhanced_nop_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
+    if (config && config->transformations.anti_analysis_techniques.enabled) {
+        instruction_list* next_instructions = apply_anti_analysis_techniques(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    fflush(stdout);
-    free_instruction_list(shuffled_instructions);
-
-    // Apply control flow obfuscation
-    instruction_list* cfo_instructions = apply_control_flow_obfuscation(enhanced_nop_instructions);
-    recalculate_addresses(cfo_instructions);
-    if (!cfo_instructions) {
-        fprintf(stderr, "Control flow obfuscation failed.\n");
-        free_instruction_list(enhanced_nop_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
+    if (config && config->transformations.virtualization_engine.enabled) {
+        instruction_list* next_instructions = apply_virtualization_engine(transformed_instructions);
+        if (transformed_instructions != original_instructions) {
+            // If this isn't the original list, it's an intermediate result we need to free later
+            if (to_free) free_instruction_list(to_free);
+            to_free = transformed_instructions;
+        }
+        transformed_instructions = next_instructions;
+        recalculate_addresses(transformed_instructions);
     }
-    printf("\nControl Flow Obfuscated Instructions:\n");
-    for (size_t i = 0; i < cfo_instructions->count; i++) {
-        cs_insn* insn = &cfo_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
-    }
-    fflush(stdout);
-    free_instruction_list(enhanced_nop_instructions);
-
-    // Apply stack frame obfuscation
-    instruction_list* sfo_instructions = apply_stack_frame_obfuscation(cfo_instructions);
-    recalculate_addresses(sfo_instructions);
-    if (!sfo_instructions) {
-        fprintf(stderr, "Stack frame obfuscation failed.\n");
-        free_instruction_list(cfo_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
-    }
-    printf("\nStack Frame Obfuscated Instructions:\n");
-    for (size_t i = 0; i < sfo_instructions->count; i++) {
-        cs_insn* insn = &sfo_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
-    }
-    fflush(stdout);
-    free_instruction_list(cfo_instructions);
-
-    // Apply instruction reordering
-    instruction_list* reordered_instructions = apply_instruction_reordering(sfo_instructions);
-    recalculate_addresses(reordered_instructions);
-    if (!reordered_instructions) {
-        fprintf(stderr, "Instruction reordering failed.\n");
-        free_instruction_list(sfo_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
-    }
-    printf("\nReordered Instructions:\n");
-    for (size_t i = 0; i < reordered_instructions->count; i++) {
-        cs_insn* insn = &reordered_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
-    }
-    fflush(stdout);
-    free_instruction_list(sfo_instructions);
-
-    // Apply anti-analysis techniques
-    instruction_list* anti_analysis_instructions = apply_anti_analysis_techniques(reordered_instructions);
-    recalculate_addresses(anti_analysis_instructions);
-    if (!anti_analysis_instructions) {
-        fprintf(stderr, "Anti-analysis techniques failed.\n");
-        free_instruction_list(reordered_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
-    }
-    printf("\nAnti-Analysis Instructions:\n");
-    for (size_t i = 0; i < anti_analysis_instructions->count; i++) {
-        cs_insn* insn = &anti_analysis_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
-    }
-    fflush(stdout);
-    free_instruction_list(reordered_instructions);
-
-    // Apply virtualization engine
-    instruction_list* virtualized_instructions = apply_virtualization_engine(anti_analysis_instructions);
-    recalculate_addresses(virtualized_instructions);
-    if (!virtualized_instructions) {
-        fprintf(stderr, "Virtualization engine failed.\n");
-        free_instruction_list(anti_analysis_instructions);
-        free_pe_info(pe);
-        cs_close(&handle);
-        return 1;
-    }
-    printf("\nVirtualized Instructions:\n");
-    for (size_t i = 0; i < virtualized_instructions->count; i++) {
-        cs_insn* insn = &virtualized_instructions->instructions[i];
-        printf("0x%"PRIx64":\t%s\t%s\n", insn->address, insn->mnemonic, insn->op_str);
-    }
-    fflush(stdout);
-    free_instruction_list(anti_analysis_instructions);
 
     // Reassemble transformed instructions back into binary format
     size_t reassembled_size;
-    unsigned char* reassembled_code = reassemble_instructions(virtualized_instructions, &reassembled_size);
+    unsigned char* reassembled_code = reassemble_instructions(transformed_instructions, &reassembled_size);
     if (!reassembled_code) {
         fprintf(stderr, "Failed to reassemble transformed instructions.\n");
-        free_instruction_list(virtualized_instructions);
+        if (transformed_instructions != original_instructions) free_instruction_list(transformed_instructions);
+        free_instruction_list(original_instructions);
         free_pe_info(pe);
         cs_close(&handle);
         return 1;
@@ -274,16 +301,58 @@ int main(int argc, char *argv[]) {
     if (write_result != 0) {
         fprintf(stderr, "Failed to write transformed PE file.\n");
         free(reassembled_code);
-        free_instruction_list(virtualized_instructions);
+        if (transformed_instructions != original_instructions) free_instruction_list(transformed_instructions);
+        free_instruction_list(original_instructions);
         free_pe_info(pe);
         cs_close(&handle);
         return 1;
     }
+    
+    // If validation is enabled in the config, check that the transformed executable behaves the same as the original
+    if (config && config->security.validate_functionality) {
+        printf("Validating transformed executable functionality...\n");
+        int validation_result = validate_transformation(filepath, output_filename);
+        
+        if (validation_result == -1) {
+            fprintf(stderr, "Validation failed: Could not run executables for comparison\n");
+        } else if (validation_result == 0) {
+            fprintf(stderr, "Validation failed: Transformed executable produces different output than original\n");
+            
+            // Remove the invalid transformed file
+            remove(output_filename);
+            
+            // Clean up resources
+            free(reassembled_code);
+            free_instruction_list(transformed_instructions);
+            free_instruction_list(original_instructions);
+            if (to_free && to_free != transformed_instructions && to_free != original_instructions) {
+                free_instruction_list(to_free);
+            }
+            free_pe_info(pe);
+            cs_close(&handle);
+            if (config) free(config);
+            return 1;
+        } else {
+            printf("Validation passed: Transformed executable produces same output as original\n");
+        }
+    }
+    
     printf("Successfully wrote transformed PE file to: %s\n", output_filename);
 
     // Clean up
     free(reassembled_code);
-    free_instruction_list(virtualized_instructions);
+    free_instruction_list(original_instructions);
+    if (transformed_instructions != original_instructions) {
+        free_instruction_list(transformed_instructions);
+    }
+    if (to_free && to_free != transformed_instructions && to_free != original_instructions) {
+        free_instruction_list(to_free);
+    }
+    free_pe_info(pe);
+    cs_close(&handle);
+    if (config) free(config);
+
+    return 0;
 
     return 0;
 }
